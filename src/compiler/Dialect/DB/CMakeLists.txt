@@ -2,6 +2,7 @@ set(LLVM_TARGET_DEFINITIONS Transforms/EliminateNulls.td)
 mlir_tablegen(EliminateNulls.inc -gen-rewriters)
 add_public_tablegen_target(MLIRDBEliminateNullsIncGen)
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/lingodb_ext)
 add_dependencies(build_includes MLIRDBEliminateNullsIncGen)
 
 
@@ -16,6 +17,7 @@ add_mlir_dialect_library(MLIRDB
         ADDITIONAL_HEADER_DIRS
         ../../../../include/lingodb/compiler/Dialect/DB
         ${CMAKE_CURRENT_BINARY_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}/lingodb_ext
 
         DEPENDS
         dump-rt-defs

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.13.4)
 if (POLICY CMP0116)
     cmake_policy(SET CMP0116 OLD)
 endif ()
-project(lingodb LANGUAGES CXX C)
+
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard to conform to")
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DTRACER")
@@ -67,13 +67,16 @@ include_directories(${LLVM_INCLUDE_DIRS})
 include_directories(${MLIR_INCLUDE_DIRS})
 include_directories(${CLANG_INCLUDE_DIRS})
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
-include_directories(${PROJECT_SOURCE_DIR}/vendored)
-add_subdirectory(${PROJECT_SOURCE_DIR}/vendored/libpg_query/ EXCLUDE_FROM_ALL)
-add_subdirectory(${PROJECT_SOURCE_DIR}/vendored/linenoise-ng/ EXCLUDE_FROM_ALL)
+message(STATUS "USING current source dir :: ${CMAKE_CURRENT_SOURCE_DIR}")
+
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/vendored)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/vendored/libpg_query/ EXCLUDE_FROM_ALL)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/vendored/linenoise-ng/ EXCLUDE_FROM_ALL)
 
 
-include_directories(${PROJECT_BINARY_DIR}/include)
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
+
 link_directories(${LLVM_BUILD_LIBRARY_DIR})
 add_definitions(${LLVM_DEFINITIONS})
 set(LLVM_LINK_COMPONENTS
@@ -182,3 +185,38 @@ add_subdirectory(tools)
 if (ENABLE_TESTS)
     add_subdirectory(test)
 endif ()
+
+add_library(lingodb_ext STATIC)
+
+# Add all source files from your project's subdirectories
+file(GLOB_RECURSE LINGODB_SOURCES
+    "src/*.cpp"
+    "src/catalog/*.cpp"
+    "src/compiler/**/*.cpp"
+    "src/execution/*.cpp"
+    "src/execution/**/*.cpp"
+    "src/runtime/*.cpp"
+    "src/runtime/**/*.cpp"
+    "src/scheduler/*.cpp"
+    "src/utility/*.cpp"
+    "src/tools/*.cpp"
+    "src/utility/*.cpp"
+)
+target_sources(lingodb_ext PRIVATE ${LINGODB_SOURCES})
+
+set_target_properties(lingodb_ext PROPERTIES
+    OUTPUT_NAME "lingodb"
+    SUFFIX ".duckdb_extension"
+)
+target_link_libraries(lingodb_ext PUBLIC duckdb_static ${LIBS})
+target_compile_definitions(lingodb_ext PRIVATE
+    SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+add_compile_definitions(RUN_QUERIES_WITH_PERF=1)
+target_include_directories(lingodb_ext PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/lingodb_ext/include
+    ${CMAKE_BINARY_DIR}/lingodb_ext/src/compiler/Dialect/DB/
+    ${PROJECT_SOURCE_DIR}/lingodb_ext/vendored/linenoise-ng 
+)

@@ -14,7 +14,7 @@ target_link_libraries(runtime-header-tool
 ## Query clang-tool flags once (equal for all calls)
 # Base flags
 set(CLANG_TOOL_FLAGS "-xc++" "--std=c++20" "-v" "-v" "-v")
-set(CLANG_TOOL_FLAGS "${CLANG_TOOL_FLAGS}" "-I${CMAKE_SOURCE_DIR}/include")
+set(CLANG_TOOL_FLAGS "${CLANG_TOOL_FLAGS}" "-I${CMAKE_SOURCE_DIR}/lingodb_ext/include")
 set(CLANG_TOOL_FLAGS "${CLANG_TOOL_FLAGS}" "-I${ARROW_INCLUDE_DIR}")
 
 # Get Clang resource directory
@@ -93,6 +93,6 @@ function(gen_rt_def_generic target_name header_file output_path input_path lib_p
 endfunction()
 
 function(gen_rt_def target_name header_file)
-    gen_rt_def_generic(${target_name} ${header_file} "include/lingodb/compiler/runtime" "include/lingodb/runtime" "lingodb::runtime::" "lingodb::compiler::runtime")
+    gen_rt_def_generic(${target_name} ${header_file} "lingodb_ext/include/lingodb/compiler/runtime" "lingodb_ext/include/lingodb/runtime" "lingodb::runtime::" "lingodb::compiler::runtime")
     set(runtime_funcs_ptr_libs "${runtime_funcs_ptr_libs} ${runtime_funcs_ptr_lib}" PARENT_SCOPE)
 endfunction()
