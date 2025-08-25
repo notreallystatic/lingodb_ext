@@ -208,7 +208,7 @@ set_target_properties(lingodb_ext PROPERTIES
     OUTPUT_NAME "lingodb"
     SUFFIX ".duckdb_extension"
 )
-target_link_libraries(lingodb_ext PUBLIC duckdb_static ${LIBS})
+target_link_libraries(lingodb_ext PUBLIC ${LIBS})
 target_compile_definitions(lingodb_ext PRIVATE
     SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
@@ -216,7 +216,7 @@ target_compile_definitions(lingodb_ext PRIVATE
 add_compile_definitions(RUN_QUERIES_WITH_PERF=1)
 target_include_directories(lingodb_ext PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/lingodb_ext/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
     ${CMAKE_BINARY_DIR}/lingodb_ext/src/compiler/Dialect/DB/
     ${PROJECT_SOURCE_DIR}/lingodb_ext/vendored/linenoise-ng 
 )
