@@ -1151,7 +1151,7 @@ mlir::Value frontend::sql::Parser::translateExpression(mlir::OpBuilder& builder,
          break;
       }
       case T_Integer: {
-         auto intVal = reinterpret_cast<Value*>(node)->val_.ival_;
+         auto intVal = reinterpret_cast<ParsedNodesValue*>(node)->val_.ival_;
          return builder.create<db::ConstantOp>(loc, builder.getI32Type(), builder.getI32IntegerAttr(intVal));
       }
       case T_CaseExpr: {
@@ -2535,7 +2535,7 @@ std::vector<std::string> frontend::sql::Parser::listToStringVec(List* l) {
    std::vector<std::string> res;
    if (l != nullptr) {
       for (auto* cell = l->head; cell != nullptr; cell = cell->next) {
-         auto* const target = reinterpret_cast<Value*>(cell->data.ptr_value);
+         auto* const target = reinterpret_cast<ParsedNodesValue*>(cell->data.ptr_value);
          auto* const column = target->val_.str_;
          res.push_back(column);
       }

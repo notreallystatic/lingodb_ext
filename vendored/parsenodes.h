@@ -15,7 +15,7 @@
 /**
  * A value parsenode as produced by the Postgres parser
  */
-using value = struct Value {
+using value = struct ParsedNodesValue {
    NodeTag type_; /**< tag appropriately (eg. T_String) */
    /**
    * value, as specified via tag
@@ -351,7 +351,7 @@ using CommonTableExpr = struct CommonTableExpr {
    /* These fields are set during parse analysis: */
    bool cterecursive_; /* is this CTE actually recursive? */
    int cterefcount_; // number of RTEs referencing this CTE
-      // (excluding internal self-references)
+   // (excluding internal self-references)
    List* ctecolnames_; /* list of output column names */
    List* ctecoltypes_; /* OID list of output column type OIDs */
    List* ctecoltypmods_; /* integer list of output column typmods */
@@ -886,13 +886,12 @@ struct GroupingSet {
 };
 typedef unsigned int Index;
 
-struct GroupingFunc
-{
-   Expr		xpr;
-   List	   *args;			/* arguments, not evaluated but kept for
+struct GroupingFunc {
+   Expr xpr;
+   List* args; /* arguments, not evaluated but kept for
 								 * benefit of EXPLAIN etc. */
-   List	   *refs;			/* ressortgrouprefs of arguments */
-   List	   *cols;			/* actual column positions set by planner */
-   Index		agglevelsup;	/* same as Aggref.agglevelsup */
-   int			location;		/* token location */
+   List* refs; /* ressortgrouprefs of arguments */
+   List* cols; /* actual column positions set by planner */
+   Index agglevelsup; /* same as Aggref.agglevelsup */
+   int location; /* token location */
 };

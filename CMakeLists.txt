@@ -213,10 +213,16 @@ target_compile_definitions(lingodb_ext PRIVATE
     SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
+find_package(Boost REQUIRED COMPONENTS context)
+target_link_libraries(lingodb_ext PUBLIC Boost::context)
+
+
 add_compile_definitions(RUN_QUERIES_WITH_PERF=1)
 target_include_directories(lingodb_ext PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
-    ${CMAKE_BINARY_DIR}/lingodb_ext/src/compiler/Dialect/DB/
-    ${PROJECT_SOURCE_DIR}/lingodb_ext/vendored/linenoise-ng 
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/lingodb_ext/src/compiler/Dialect/DB/>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/lingodb_ext/include/>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/lingodb_ext/vendored/linenoise-ng>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/lingodb_ext/vendored/>
 )
