@@ -31,12 +31,23 @@ add_library(${PROJECT_NAME}::pg_query ALIAS pg_query)
 # Specify all the necessary includes.
 target_include_directories(
         pg_query
+        # SYSTEM PUBLIC
+        # # These includes are exposed to the users of this library.
+        # ${CMAKE_CURRENT_SOURCE_DIR}/../src/postgres/include
+        # ${CMAKE_CURRENT_SOURCE_DIR}/..
+        # PRIVATE
+        # # These includes are library-internal and necessary for compilation.
+        # ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/include
+        # ${CMAKE_CURRENT_SOURCE_DIR}
         SYSTEM PUBLIC
-        # These includes are exposed to the users of this library.
-        ${CMAKE_CURRENT_SOURCE_DIR}/../src/postgres/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/..
-        PRIVATE
-        # These includes are library-internal and necessary for compilation.
+        # These includes are for when building from source
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+        # These includes are for when the library is installed
+        $<INSTALL_INTERFACE:include/lingodb/src/postgres/include>
+        $<INSTALL_INTERFACE:include/lingodb/src>
+        PRIVATE 
+        # These includes are library-internal and necessary for compilation.    
         ${CMAKE_CURRENT_SOURCE_DIR}/src/postgres/include
         ${CMAKE_CURRENT_SOURCE_DIR}
 )

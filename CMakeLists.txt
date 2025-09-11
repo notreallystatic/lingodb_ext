@@ -208,7 +208,7 @@ set_target_properties(lingodb_ext PROPERTIES
     OUTPUT_NAME "lingodb"
     SUFFIX ".duckdb_extension"
 )
-target_link_libraries(lingodb_ext PUBLIC ${LIBS})
+target_link_libraries(lingodb_ext PUBLIC ${LIBS} runner scheduler MLIRSQLFrontend pg_query::pg_query catalog mlirTypes)
 target_compile_definitions(lingodb_ext PRIVATE
     SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
