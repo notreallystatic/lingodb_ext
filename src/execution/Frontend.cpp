@@ -19,6 +19,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/DialectRegistry.h"
@@ -32,7 +33,8 @@
 #include <llvm/Support/SourceMgr.h>
 
 #include <iostream>
-void lingodb::execution::initializeContext(mlir::MLIRContext& context) {
+namespace lingodb::execution {
+void initializeContext(mlir::MLIRContext& context) {
    using namespace lingodb::compiler::dialect;
    mlir::DialectRegistry registry;
    registry.insert<mlir::BuiltinDialect>();
@@ -65,11 +67,50 @@ void lingodb::execution::initializeContext(mlir::MLIRContext& context) {
    context.loadDialect<relalg::RelAlgDialect>();
    context.disableMultithreading();
 }
+
+void MLIRContainer::initialize() {
+   initialized = true;
+   initializeContext(getContext());
+   moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
+   builder.setInsertionPointToStart(moduleOp->getBody());
+}
+
+MLIRContainer::MLIRContainer() : builder(mlir::OpBuilder(&context)) {
+   std::cout << "[Frontend.cpp](MLIRContainer::MLIRContainer) Constructor START\n";
+   builder = mlir::OpBuilder(&context);
+   if (!initialized) {
+      initialized = true;
+      initialize();
+   }
+   std::cout << "[Frontend.cpp](MLIRContainer::MLIRContainer) Constructor FINISHED\n";
+   std::cout.flush();
+}
+
+void MLIRContainer::printInfo() {
+   std::cout << "[Frontend.cpp](MLIRContainer::printInfo) dumping moduleOp\n";
+   moduleOp->dump();
+   std::cout.flush();
+}
+
+// void MLIRContainer::createMainFuncBlock() {
+//    auto* queryBlock = new mlir::Block;
+//    mlir::func::FuncOp funcOp = builder.create<mlir::func::FuncOp>(builder.getUnknownLoc(), "main", builder.getFunctionType({}, {}));
+//    funcOp.getBody().push_back(queryBlock);
+// }
+
+void MLIRContainer::print() {
+   std::cout << "[Frontend.cpp](MLIRContainer::print)\n";
+   flags.assumeVerified();
+   moduleOp->dump();
+}
+}
 namespace {
 
 class MLIRFrontend : public lingodb::execution::Frontend {
    mlir::MLIRContext context;
    mlir::OwningOpRef<mlir::ModuleOp> module;
+
+   public:
    void loadFromFile(std::string fileName) override {
       lingodb::execution::initializeContext(context);
       llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
@@ -93,6 +134,13 @@ class MLIRFrontend : public lingodb::execution::Frontend {
          error.emit() << "Error can't load module\n";
       }
    }
+
+   void loadFromGlobalContext() override {
+      auto& instance = lingodb::execution::MLIRContainer::getInstance();
+      // context = instance.getContext();
+      module = instance.getModuleOp();
+   }
+
    mlir::ModuleOp* getModule() override {
       assert(module);
       return module.operator->();
@@ -126,6 +174,11 @@ class SQLFrontend : public lingodb::execution::Frontend {
       module = moduleOp;
       parallismAllowed = translator.isParallelismAllowed();
    }
+
+   void loadFromGlobalContext() override {
+      std::cout << "[Frontend.cpp](SQLFrontend::loadFromGlobalContext) :: NOT IMPLEMENTED\n";
+   }
+
    void loadFromFile(std::string fileName) override {
       std::ifstream istream{fileName};
       if (!istream) {
@@ -145,6 +198,10 @@ class SQLFrontend : public lingodb::execution::Frontend {
    }
 };
 } // namespace
+
+namespace lingodb::execution {
+
+}
 std::unique_ptr<lingodb::execution::Frontend> lingodb::execution::createMLIRFrontend() {
    return std::make_unique<MLIRFrontend>();
 }

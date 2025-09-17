@@ -2,8 +2,15 @@
 #define LINGODB_EXECUTION_FRONTEND_H
 #include "Error.h"
 #include "lingodb/catalog/Catalog.h"
+
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/OperationSupport.h"
+
+#include <memory>
+
 namespace mlir {
-class ModuleOp;
+// class ModuleOp;
 class MLIRContext;
 } // namespace mlir
 namespace lingodb::execution {
@@ -27,6 +34,7 @@ class Frontend {
    Error& getError() { return error; }
    virtual void loadFromFile(std::string fileName) = 0;
    virtual void loadFromString(std::string data) = 0;
+   virtual void loadFromGlobalContext() = 0;
    virtual bool isParallelismAllowed() { return true; }
    virtual mlir::ModuleOp* getModule() = 0;
    virtual ~Frontend() {}
@@ -34,6 +42,39 @@ class Frontend {
 std::unique_ptr<Frontend> createMLIRFrontend();
 std::unique_ptr<Frontend> createSQLFrontend();
 void initializeContext(mlir::MLIRContext& context);
+
+class MLIRContainer {
+   private:
+   MLIRContainer();
+   bool initialized = false;
+
+   public:
+   mlir::MLIRContext context;
+   mlir::OpBuilder builder;
+   mlir::OwningOpRef<mlir::ModuleOp> moduleOp;
+   mlir::OpPrintingFlags flags;
+
+   static MLIRContainer& getInstance() {
+      static MLIRContainer instance;
+      if (!instance.initialized) {
+         instance.initialize();
+      }
+      return instance;
+   }
+
+   void initialize();
+   // void createMainFuncBlock();
+   void print();
+   void printInfo();
+
+   mlir::MLIRContext& getContext() { return context; }
+   mlir::MLIRContext* getContextPtr() { return &context; }
+   mlir::ModuleOp* getModuleOpPtr() { return moduleOp.operator->(); }
+   mlir::ModuleOp getModuleOp() { return moduleOp.get(); }
+   // mlir::ModuleOp* getModuleOpPtr() { return moduleOp; }
+   mlir::OpBuilder& getBuilder() { return builder; }
+   mlir::OpPrintingFlags& getFlags() { return flags; }
+};
 
 } //namespace lingodb::execution
 

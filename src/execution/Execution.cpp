@@ -265,6 +265,8 @@ class DefaultQueryExecuter : public QueryExecuter {
          frontend.loadFromString(data.value());
       } else if (file) {
          frontend.loadFromFile(file.value());
+      } else if (globalContext) {
+         frontend.loadFromGlobalContext();
       } else {
          std::cerr << "Must provide file or string!" << std::endl;
          exit(1);
@@ -274,6 +276,9 @@ class DefaultQueryExecuter : public QueryExecuter {
 
       handleError("FRONTEND", frontend.getError());
       mlir::ModuleOp& moduleOp = *queryExecutionConfig->frontend->getModule();
+      std::cout << "[QueryExecutor](execute) :: Loaded moduleOp\n";
+      std::cout.flush();
+      // moduleOp->dump();
       snapshotImportantStep("canonical", moduleOp, serializationState);
       if (queryExecutionConfig->queryOptimizer) {
          auto& queryOptimizer = *queryExecutionConfig->queryOptimizer;

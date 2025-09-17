@@ -112,6 +112,7 @@ class QueryExecuter {
    std::unique_ptr<runtime::ExecutionContext> executionContext;
    std::optional<std::string> data;
    std::optional<std::string> file;
+   std::optional<bool> globalContext;
 
    public:
    QueryExecuter(std::unique_ptr<QueryExecutionConfig> queryExecutionConfig, std::unique_ptr<runtime::ExecutionContext> executionContext) : queryExecutionConfig(std::move(queryExecutionConfig)), executionContext(std::move(executionContext)), data(), file() {}
@@ -120,6 +121,9 @@ class QueryExecuter {
    }
    void fromFile(std::string file) {
       this->file = file;
+   }
+   void fromGlobalContext(bool globalContext) {
+      this->globalContext = globalContext;
    }
    virtual void execute() = 0;
    QueryExecutionConfig& getConfig() { return *queryExecutionConfig; }
