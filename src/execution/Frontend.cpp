@@ -75,7 +75,7 @@ void MLIRContainer::initialize() {
    builder.setInsertionPointToStart(moduleOp->getBody());
 }
 
-MLIRContainer::MLIRContainer() : builder(mlir::OpBuilder(&context)) {
+MLIRContainer::MLIRContainer() : builder(mlir::OpBuilder(&context)), predBlock(nullptr) {
    std::cout << "[Frontend.cpp](MLIRContainer::MLIRContainer) Constructor START\n";
    builder = mlir::OpBuilder(&context);
    if (!initialized) {

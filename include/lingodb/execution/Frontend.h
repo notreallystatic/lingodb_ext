@@ -2,6 +2,7 @@
 #define LINGODB_EXECUTION_FRONTEND_H
 #include "Error.h"
 #include "lingodb/catalog/Catalog.h"
+#include "lingodb/compiler/Dialect/TupleStream/ColumnManager.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -54,6 +55,8 @@ class MLIRContainer {
    mlir::OwningOpRef<mlir::ModuleOp> moduleOp;
    mlir::OpPrintingFlags flags;
 
+   mlir::Block* predBlock;
+
    static MLIRContainer& getInstance() {
       static MLIRContainer instance;
       if (!instance.initialized) {
@@ -74,6 +77,8 @@ class MLIRContainer {
    // mlir::ModuleOp* getModuleOpPtr() { return moduleOp; }
    mlir::OpBuilder& getBuilder() { return builder; }
    mlir::OpPrintingFlags& getFlags() { return flags; }
+   void setPredBlock(mlir::Block* block) { predBlock = block; }
+   mlir::Block* getPredBlock() { return predBlock; }
 };
 
 } //namespace lingodb::execution
