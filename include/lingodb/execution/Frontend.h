@@ -9,6 +9,8 @@
 #include "mlir/IR/OperationSupport.h"
 
 #include <memory>
+#include <utility>
+#include <vector>
 
 namespace mlir {
 // class ModuleOp;
@@ -55,7 +57,13 @@ class MLIRContainer {
    mlir::OwningOpRef<mlir::ModuleOp> moduleOp;
    mlir::OpPrintingFlags flags;
 
+   mlir::Value baseTableOp;
+   mlir::Value aggrOp;
+
    mlir::Block* predBlock;
+   mlir::Block* aggrBlock;
+
+   std::vector<std::pair<std::string, lingodb::compiler::dialect::tuples::Column*>> columnMapping;
 
    static MLIRContainer& getInstance() {
       static MLIRContainer instance;
@@ -79,6 +87,10 @@ class MLIRContainer {
    mlir::OpPrintingFlags& getFlags() { return flags; }
    void setPredBlock(mlir::Block* block) { predBlock = block; }
    mlir::Block* getPredBlock() { return predBlock; }
+
+   std::vector<std::pair<std::string, lingodb::compiler::dialect::tuples::Column*>>& getColumnMapping() {
+      return columnMapping;
+   }
 };
 
 } //namespace lingodb::execution
