@@ -52,7 +52,7 @@ class MLIRContainer {
    bool initialized = false;
 
    public:
-   mlir::MLIRContext context;
+   std::unique_ptr<mlir::MLIRContext> context;
    mlir::OpBuilder builder;
    mlir::OwningOpRef<mlir::ModuleOp> moduleOp;
    mlir::OpPrintingFlags flags;
@@ -67,19 +67,19 @@ class MLIRContainer {
 
    static MLIRContainer& getInstance() {
       static MLIRContainer instance;
-      if (!instance.initialized) {
-         instance.initialize();
-      }
+      instance.initialize();
       return instance;
    }
+
+   static void reset();
 
    void initialize();
    // void createMainFuncBlock();
    void print();
    void printInfo();
 
-   mlir::MLIRContext& getContext() { return context; }
-   mlir::MLIRContext* getContextPtr() { return &context; }
+   mlir::MLIRContext& getContext() { return *context; }
+   mlir::MLIRContext* getContextPtr() { return context.get(); }
    mlir::ModuleOp* getModuleOpPtr() { return moduleOp.operator->(); }
    mlir::ModuleOp getModuleOp() { return moduleOp.get(); }
    // mlir::ModuleOp* getModuleOpPtr() { return moduleOp; }

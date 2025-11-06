@@ -35,6 +35,8 @@
 #include <iostream>
 namespace lingodb::execution {
 void initializeContext(mlir::MLIRContext& context) {
+   std::cout << "[Frontend.cpp](initializeContext) Initializing MLIR Context\n";
+   std::cout.flush();
    using namespace lingodb::compiler::dialect;
    mlir::DialectRegistry registry;
    registry.insert<mlir::BuiltinDialect>();
@@ -66,23 +68,57 @@ void initializeContext(mlir::MLIRContext& context) {
    context.loadAllAvailableDialects();
    context.loadDialect<relalg::RelAlgDialect>();
    context.disableMultithreading();
+   std::cout << "[Frontend.cpp](initializeContext) MLIR Context Initialization FINISHED\n";
+   std::cout.flush();
 }
 
 void MLIRContainer::initialize() {
-   initialized = true;
-   initializeContext(getContext());
+   if (initialized) {
+      std::cout << "[Frontend.cpp](MLIRContainer::initialize) MLIRContainer singleton instance already initialized\n";
+      std::cout.flush();
+      return;
+   }
+   std::cout << "[Frontend.cpp](MLIRContainer::initialize) Initializing MLIRContainer singleton instance\n";
+   std::cout.flush();
+   auto& context = getContext();
+   initializeContext(context);
    moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
    builder.setInsertionPointToStart(moduleOp->getBody());
+   initialized = true;
+   std::cout << "[Frontend.cpp](MLIRContainer::initialize) Initialization FINISHED\n";
+   std::cout.flush();
 }
 
-MLIRContainer::MLIRContainer() : builder(mlir::OpBuilder(&context)), predBlock(nullptr) {
+MLIRContainer::MLIRContainer() : context(std::make_unique<mlir::MLIRContext>()), builder(mlir::OpBuilder(context.get())), predBlock(nullptr) {
    std::cout << "[Frontend.cpp](MLIRContainer::MLIRContainer) Constructor START\n";
+   auto& context = getContext();
    builder = mlir::OpBuilder(&context);
    if (!initialized) {
-      initialized = true;
       initialize();
    }
    std::cout << "[Frontend.cpp](MLIRContainer::MLIRContainer) Constructor FINISHED\n";
+   std::cout.flush();
+}
+
+void MLIRContainer::reset() {
+   std::cout << "[Frontend.cpp](MLIRContainer::reset) Resetting MLIRContainer singleton instance\n";
+   std::cout.flush();
+   auto& instance = getInstance();
+
+   if (instance.moduleOp) {
+      instance.moduleOp->erase();
+      instance.moduleOp = nullptr;
+   }
+
+   instance.initialized = false;
+   instance.context = std::make_unique<mlir::MLIRContext>();
+   instance.builder = mlir::OpBuilder(instance.context.get());
+   instance.predBlock = nullptr;
+   instance.baseTableOp = mlir::Value();
+   instance.aggrOp = mlir::Value();
+   instance.columnMapping.clear();
+   instance.initialize();
+   std::cout << "[Frontend.cpp](MLIRContainer::reset) Reset FINISHED\n";
    std::cout.flush();
 }
 
