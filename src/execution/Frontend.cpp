@@ -80,8 +80,10 @@ void MLIRContainer::initialize() {
    }
    std::cout << "[Frontend.cpp](MLIRContainer::initialize) Initializing MLIRContainer singleton instance\n";
    std::cout.flush();
+
    auto& context = getContext();
    initializeContext(context);
+   builder = mlir::OpBuilder(this->context.get());
    moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
    builder.setInsertionPointToStart(moduleOp->getBody());
    initialized = true;
@@ -105,14 +107,11 @@ void MLIRContainer::reset() {
    std::cout.flush();
    auto& instance = getInstance();
 
-   if (instance.moduleOp) {
-      instance.moduleOp->erase();
-      instance.moduleOp = nullptr;
-   }
-
+   instance.moduleOp = nullptr;
    instance.initialized = false;
    instance.context = std::make_unique<mlir::MLIRContext>();
-   instance.builder = mlir::OpBuilder(instance.context.get());
+   auto& context = instance.getContext();
+   instance.builder = mlir::OpBuilder(&context);
    instance.predBlock = nullptr;
    instance.baseTableOp = mlir::Value();
    instance.aggrOp = mlir::Value();
