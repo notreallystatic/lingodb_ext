@@ -276,8 +276,8 @@ class DefaultQueryExecuter : public QueryExecuter {
 
       handleError("FRONTEND", frontend.getError());
       mlir::ModuleOp& moduleOp = *queryExecutionConfig->frontend->getModule();
-      std::cout << "[QueryExecutor](execute) :: Loaded moduleOp\n";
-      std::cout.flush();
+      // std::cout << "[QueryExecutor](execute) :: Loaded moduleOp\n";
+      // std::cout.flush();
       // moduleOp->dump();
       snapshotImportantStep("canonical", moduleOp, serializationState);
       if (queryExecutionConfig->queryOptimizer) {
