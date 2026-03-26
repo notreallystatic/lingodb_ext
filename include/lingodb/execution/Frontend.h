@@ -57,11 +57,6 @@ class MLIRContainer {
    mlir::OwningOpRef<mlir::ModuleOp> moduleOp;
    mlir::OpPrintingFlags flags;
 
-   mlir::Value baseTableOp;
-   mlir::Value aggrOp;
-
-   mlir::Block* predBlock;
-   mlir::Block* aggrBlock;
    mlir::Block* mainBlock;
    mlir::Block* queryBlock;
 
@@ -76,7 +71,6 @@ class MLIRContainer {
    static void reset();
 
    void initialize();
-   // void createMainFuncBlock();
    void print();
    void printInfo();
 
@@ -84,11 +78,8 @@ class MLIRContainer {
    mlir::MLIRContext* getContextPtr() { return context.get(); }
    mlir::ModuleOp* getModuleOpPtr() { return moduleOp.operator->(); }
    mlir::ModuleOp getModuleOp() { return moduleOp.get(); }
-   // mlir::ModuleOp* getModuleOpPtr() { return moduleOp; }
    mlir::OpBuilder& getBuilder() { return builder; }
    mlir::OpPrintingFlags& getFlags() { return flags; }
-   void setPredBlock(mlir::Block* block) { predBlock = block; }
-   mlir::Block* getPredBlock() { return predBlock; }
 
    std::vector<std::pair<std::string, lingodb::compiler::dialect::tuples::Column*>>& getColumnMapping() {
       return columnMapping;

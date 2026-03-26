@@ -34,220 +34,191 @@
 
 #include <iostream>
 namespace lingodb::execution {
-void initializeContext(mlir::MLIRContext& context) {
-   // std::cout << "[Frontend.cpp](initializeContext) Initializing MLIR Context\n";
-   // std::cout.flush();
-   using namespace lingodb::compiler::dialect;
-   mlir::DialectRegistry registry;
-   registry.insert<mlir::BuiltinDialect>();
-   registry.insert<relalg::RelAlgDialect>();
-   registry.insert<tuples::TupleStreamDialect>();
-   registry.insert<subop::SubOperatorDialect>();
-   registry.insert<db::DBDialect>();
-   registry.insert<lingodb::compiler::dialect::arrow::ArrowDialect>();
-   registry.insert<mlir::func::FuncDialect>();
-   registry.insert<mlir::arith::ArithDialect>();
-   registry.insert<mlir::cf::ControlFlowDialect>();
-   registry.insert<mlir::DLTIDialect>();
+	void initializeContext(mlir::MLIRContext& context) {
+		using namespace lingodb::compiler::dialect;
+		mlir::DialectRegistry registry;
+		registry.insert<mlir::BuiltinDialect>();
+		registry.insert<relalg::RelAlgDialect>();
+		registry.insert<tuples::TupleStreamDialect>();
+		registry.insert<subop::SubOperatorDialect>();
+		registry.insert<db::DBDialect>();
+		registry.insert<lingodb::compiler::dialect::arrow::ArrowDialect>();
+		registry.insert<mlir::func::FuncDialect>();
+		registry.insert<mlir::arith::ArithDialect>();
+		registry.insert<mlir::cf::ControlFlowDialect>();
+		registry.insert<mlir::DLTIDialect>();
 
-   registry.insert<mlir::memref::MemRefDialect>();
-   registry.insert<util::UtilDialect>();
-   registry.insert<mlir::scf::SCFDialect>();
-   // TODO: should we make this optional? Would require a cmake flag that deactivates the LLVM backend.
-   registry.insert<mlir::LLVM::LLVMDialect>();
+		registry.insert<mlir::memref::MemRefDialect>();
+		registry.insert<util::UtilDialect>();
+		registry.insert<mlir::scf::SCFDialect>();
+		// TODO: should we make this optional? Would require a cmake flag that deactivates the LLVM backend.
+		registry.insert<mlir::LLVM::LLVMDialect>();
 
 #if GPU_ENABLED == 1
-   registry.insert<mlir::async::AsyncDialect>();
-   registry.insert<mlir::gpu::GPUDialect>();
-   mlir::NVVM::registerNVVMTargetInterfaceExternalModels(registry);
+		registry.insert<mlir::async::AsyncDialect>();
+		registry.insert<mlir::gpu::GPUDialect>();
+		mlir::NVVM::registerNVVMTargetInterfaceExternalModels(registry);
 #endif
-   mlir::registerAllExtensions(registry);
-   // TODO: same as above, should we make this optional?
-   mlir::registerAllToLLVMIRTranslations(registry);
-   context.appendDialectRegistry(registry);
-   context.loadAllAvailableDialects();
-   context.loadDialect<relalg::RelAlgDialect>();
-   context.disableMultithreading();
-   // std::cout << "[Frontend.cpp](initializeContext) MLIR Context Initialization FINISHED\n";
-   // std::cout.flush();
-}
+		mlir::registerAllExtensions(registry);
+		// TODO: same as above, should we make this optional?
+		mlir::registerAllToLLVMIRTranslations(registry);
+		context.appendDialectRegistry(registry);
+		context.loadAllAvailableDialects();
+		context.loadDialect<relalg::RelAlgDialect>();
+		context.disableMultithreading();
+	}
 
-void MLIRContainer::initialize() {
-   if (initialized) {
-      // std::cout << "[Frontend.cpp](MLIRContainer::initialize) MLIRContainer singleton instance already initialized\n";
-      // std::cout.flush();
-      return;
-   }
-   // std::cout << "[Frontend.cpp](MLIRContainer::initialize) Initializing MLIRContainer singleton instance\n";
-   // std::cout.flush();
+	void MLIRContainer::initialize() {
+		if (initialized) {
+			return;
+		}
 
-   auto& context = getContext();
-   initializeContext(context);
-   builder = mlir::OpBuilder(this->context.get());
-   moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
-   builder.setInsertionPointToStart(moduleOp->getBody());
-   mainBlock = new mlir::Block();
-   queryBlock = new mlir::Block();
-   initialized = true;
-   // std::cout << "[Frontend.cpp](MLIRContainer::initialize) Initialization FINISHED\n";
-   // std::cout.flush();
-}
+		auto& context = getContext();
+		initializeContext(context);
+		builder = mlir::OpBuilder(this->context.get());
+		moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
+		builder.setInsertionPointToStart(moduleOp->getBody());
+		mainBlock = new mlir::Block();
+		queryBlock = new mlir::Block();
+		initialized = true;
+	}
 
-MLIRContainer::MLIRContainer() : context(std::make_unique<mlir::MLIRContext>()), builder(mlir::OpBuilder(context.get())), predBlock(nullptr) {
-   // std::cout << "[Frontend.cpp](MLIRContainer::MLIRContainer) Constructor START\n";
-   auto& context = getContext();
-   builder = mlir::OpBuilder(&context);
-   if (!initialized) {
-      initialize();
-   }
-   // std::cout << "[Frontend.cpp](MLIRContainer::MLIRContainer) Constructor FINISHED\n";
-   // std::cout.flush();
-}
+	MLIRContainer::MLIRContainer() : context(std::make_unique<mlir::MLIRContext>()), builder(mlir::OpBuilder(context.get())) {
+		auto& context = getContext();
+		builder = mlir::OpBuilder(&context);
+		if (!initialized) {
+			initialize();
+		}
+	}
 
-void MLIRContainer::reset() {
-   // std::cout << "[Frontend.cpp](MLIRContainer::reset) Resetting MLIRContainer singleton instance\n";
-   // std::cout.flush();
-   auto& instance = getInstance();
+	void MLIRContainer::reset() {
+		auto& instance = getInstance();
 
-   instance.moduleOp = nullptr;
-   instance.initialized = false;
-   instance.context = std::make_unique<mlir::MLIRContext>();
-   auto& context = instance.getContext();
-   instance.builder = mlir::OpBuilder(&context);
-   instance.predBlock = nullptr;
-   instance.mainBlock = nullptr;
-   instance.queryBlock = nullptr;
-   instance.baseTableOp = mlir::Value();
-   instance.aggrOp = mlir::Value();
-   instance.columnMapping.clear();
-   instance.initialize();
-   // std::cout << "[Frontend.cpp](MLIRContainer::reset) Reset FINISHED\n";
-   // std::cout.flush();
-}
+		instance.moduleOp = nullptr;
+		instance.initialized = false;
+		instance.context = std::make_unique<mlir::MLIRContext>();
+		auto& context = instance.getContext();
+		instance.builder = mlir::OpBuilder(&context);
+		instance.mainBlock = nullptr;
+		instance.queryBlock = nullptr;
+		instance.columnMapping.clear();
+		instance.initialize();
+	}
 
-void MLIRContainer::printInfo() {
-   // std::cout << "[Frontend.cpp](MLIRContainer::printInfo) dumping moduleOp\n";
-   moduleOp->dump();
-   // std::cout.flush();
-}
+	void MLIRContainer::printInfo() {
+		moduleOp->dump();
+	}
 
-// void MLIRContainer::createMainFuncBlock() {
-//    auto* queryBlock = new mlir::Block;
-//    mlir::func::FuncOp funcOp = builder.create<mlir::func::FuncOp>(builder.getUnknownLoc(), "main", builder.getFunctionType({}, {}));
-//    funcOp.getBody().push_back(queryBlock);
-// }
-
-void MLIRContainer::print() {
-   // std::cout << "[Frontend.cpp](MLIRContainer::print)\n";
-   flags.assumeVerified();
-   moduleOp->dump();
-}
+	void MLIRContainer::print() {
+		flags.assumeVerified();
+		moduleOp->dump();
+	}
 }
 namespace {
 
-class MLIRFrontend : public lingodb::execution::Frontend {
-   mlir::MLIRContext context;
-   mlir::OwningOpRef<mlir::ModuleOp> module;
+	class MLIRFrontend : public lingodb::execution::Frontend {
+		mlir::MLIRContext context;
+		mlir::OwningOpRef<mlir::ModuleOp> module;
 
-   public:
-   void loadFromFile(std::string fileName) override {
-      lingodb::execution::initializeContext(context);
-      llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
-         llvm::MemoryBuffer::getFileOrSTDIN(fileName);
-      if (std::error_code ec = fileOrErr.getError()) {
-         error.emit() << "Could not open input file: " << ec.message();
-         return;
-      }
-      llvm::SourceMgr sourceMgr;
-      sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
-      module = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
-      if (!module) {
-         error.emit() << "Error can't load file " << fileName << "\n";
-         return;
-      }
-   }
-   void loadFromString(std::string data) override {
-      lingodb::execution::initializeContext(context);
-      module = mlir::parseSourceString<mlir::ModuleOp>(data, &context);
-      if (!module) {
-         error.emit() << "Error can't load module\n";
-      }
-   }
+	public:
+		void loadFromFile(std::string fileName) override {
+			lingodb::execution::initializeContext(context);
+			llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> fileOrErr =
+				llvm::MemoryBuffer::getFileOrSTDIN(fileName);
+			if (std::error_code ec = fileOrErr.getError()) {
+				error.emit() << "Could not open input file: " << ec.message();
+				return;
+			}
+			llvm::SourceMgr sourceMgr;
+			sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
+			module = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
+			if (!module) {
+				error.emit() << "Error can't load file " << fileName << "\n";
+				return;
+			}
+		}
+		void loadFromString(std::string data) override {
+			lingodb::execution::initializeContext(context);
+			module = mlir::parseSourceString<mlir::ModuleOp>(data, &context);
+			if (!module) {
+				error.emit() << "Error can't load module\n";
+			}
+		}
 
-   void loadFromGlobalContext() override {
-      auto& instance = lingodb::execution::MLIRContainer::getInstance();
-      // context = instance.getContext();
-      module = instance.getModuleOp();
-	  std::cout << "[Frontend.cpp](MLIRFrontend::loadFromGlobalContext) Loaded module from global context\n";
-	  std::cout.flush();
-	  module->dump();
-	  std::cout << "\n";
-   }
+		void loadFromGlobalContext() override {
+			auto& instance = lingodb::execution::MLIRContainer::getInstance();
+			// context = instance.getContext();
+			module = instance.getModuleOp();
+			std::cout << "[Frontend.cpp](MLIRFrontend::loadFromGlobalContext) Loaded module from global context\n";
+			std::cout.flush();
+			module->dump();
+			std::cout << "\n";
+		}
 
-   mlir::ModuleOp* getModule() override {
-      assert(module);
-      return module.operator->();
-   }
-};
-class SQLFrontend : public lingodb::execution::Frontend {
-   mlir::MLIRContext context;
-   mlir::OwningOpRef<mlir::ModuleOp> module;
-   bool parallismAllowed;
-   void loadFromString(std::string sql) override {
-      lingodb::execution::initializeContext(context);
+		mlir::ModuleOp* getModule() override {
+			assert(module);
+			return module.operator->();
+		}
+	};
+	class SQLFrontend : public lingodb::execution::Frontend {
+		mlir::MLIRContext context;
+		mlir::OwningOpRef<mlir::ModuleOp> module;
+		bool parallismAllowed;
+		void loadFromString(std::string sql) override {
+			lingodb::execution::initializeContext(context);
 
-      mlir::OpBuilder builder(&context);
+			mlir::OpBuilder builder(&context);
 
-      mlir::ModuleOp moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
-      lingodb::compiler::frontend::sql::Parser translator(sql, *catalog, moduleOp);
-      builder.setInsertionPointToStart(moduleOp.getBody());
-      auto* queryBlock = new mlir::Block;
-      std::vector<mlir::Type> returnTypes;
-      {
-         mlir::OpBuilder::InsertionGuard guard(builder);
-         builder.setInsertionPointToStart(queryBlock);
-         auto val = translator.translate(builder);
-         if (val.has_value()) {
-            builder.create<lingodb::compiler::dialect::subop::SetResultOp>(builder.getUnknownLoc(), 0, val.value());
-         }
-         builder.create<mlir::func::ReturnOp>(builder.getUnknownLoc());
-      }
-      mlir::func::FuncOp funcOp = builder.create<mlir::func::FuncOp>(builder.getUnknownLoc(), "main", builder.getFunctionType({}, {}));
-      funcOp.getBody().push_back(queryBlock);
-      module = moduleOp;
-      parallismAllowed = translator.isParallelismAllowed();
-   }
+			mlir::ModuleOp moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
+			lingodb::compiler::frontend::sql::Parser translator(sql, *catalog, moduleOp);
+			builder.setInsertionPointToStart(moduleOp.getBody());
+			auto* queryBlock = new mlir::Block;
+			std::vector<mlir::Type> returnTypes;
+			{
+				mlir::OpBuilder::InsertionGuard guard(builder);
+				builder.setInsertionPointToStart(queryBlock);
+				auto val = translator.translate(builder);
+				if (val.has_value()) {
+					builder.create<lingodb::compiler::dialect::subop::SetResultOp>(builder.getUnknownLoc(), 0, val.value());
+				}
+				builder.create<mlir::func::ReturnOp>(builder.getUnknownLoc());
+			}
+			mlir::func::FuncOp funcOp = builder.create<mlir::func::FuncOp>(builder.getUnknownLoc(), "main", builder.getFunctionType({}, {}));
+			funcOp.getBody().push_back(queryBlock);
+			module = moduleOp;
+			parallismAllowed = translator.isParallelismAllowed();
+		}
 
-   void loadFromGlobalContext() override {
-      std::cout << "[Frontend.cpp](SQLFrontend::loadFromGlobalContext) :: NOT IMPLEMENTED\n";
-   }
+		void loadFromGlobalContext() override {
+			std::cout << "[Frontend.cpp](SQLFrontend::loadFromGlobalContext) :: NOT IMPLEMENTED\n";
+		}
 
-   void loadFromFile(std::string fileName) override {
-      std::ifstream istream{fileName};
-      if (!istream) {
-         error.emit() << "Error can't load file " << fileName;
-      }
-      std::stringstream buffer;
-      buffer << istream.rdbuf();
-      std::string sqlQuery = buffer.str();
-      loadFromString(sqlQuery);
-   }
-   mlir::ModuleOp* getModule() override {
-      assert(module);
-      return module.operator->();
-   }
-   bool isParallelismAllowed() override {
-      return parallismAllowed;
-   }
-};
+		void loadFromFile(std::string fileName) override {
+			std::ifstream istream{ fileName };
+			if (!istream) {
+				error.emit() << "Error can't load file " << fileName;
+			}
+			std::stringstream buffer;
+			buffer << istream.rdbuf();
+			std::string sqlQuery = buffer.str();
+			loadFromString(sqlQuery);
+		}
+		mlir::ModuleOp* getModule() override {
+			assert(module);
+			return module.operator->();
+		}
+		bool isParallelismAllowed() override {
+			return parallismAllowed;
+		}
+	};
 } // namespace
 
 namespace lingodb::execution {
 
 }
 std::unique_ptr<lingodb::execution::Frontend> lingodb::execution::createMLIRFrontend() {
-   return std::make_unique<MLIRFrontend>();
+	return std::make_unique<MLIRFrontend>();
 }
 std::unique_ptr<lingodb::execution::Frontend> lingodb::execution::createSQLFrontend() {
-   return std::make_unique<SQLFrontend>();
+	return std::make_unique<SQLFrontend>();
 }
