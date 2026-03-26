@@ -118,7 +118,8 @@ namespace {
 
 	class MLIRFrontend : public lingodb::execution::Frontend {
 		mlir::MLIRContext context;
-		mlir::OwningOpRef<mlir::ModuleOp> module;
+		mlir::OwningOpRef<mlir::ModuleOp> ownedModule;
+		mlir::ModuleOp module = nullptr;
 
 	public:
 		void loadFromFile(std::string fileName) override {
@@ -131,7 +132,8 @@ namespace {
 			}
 			llvm::SourceMgr sourceMgr;
 			sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
-			module = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
+			ownedModule = mlir::parseSourceFile<mlir::ModuleOp>(sourceMgr, &context);
+			module = ownedModule.get();
 			if (!module) {
 				error.emit() << "Error can't load file " << fileName << "\n";
 				return;
@@ -139,7 +141,8 @@ namespace {
 		}
 		void loadFromString(std::string data) override {
 			lingodb::execution::initializeContext(context);
-			module = mlir::parseSourceString<mlir::ModuleOp>(data, &context);
+			ownedModule = mlir::parseSourceString<mlir::ModuleOp>(data, &context);
+			module = ownedModule.get();
 			if (!module) {
 				error.emit() << "Error can't load module\n";
 			}
@@ -147,7 +150,8 @@ namespace {
 
 		void loadFromGlobalContext() override {
 			auto& instance = lingodb::execution::MLIRContainer::getInstance();
-			// context = instance.getContext();
+			// Do not take ownership of the global module; it is owned by MLIRContainer.
+			ownedModule = nullptr;
 			module = instance.getModuleOp();
 			std::cout << "[Frontend.cpp](MLIRFrontend::loadFromGlobalContext) Loaded module from global context\n";
 			std::cout.flush();
@@ -157,7 +161,7 @@ namespace {
 
 		mlir::ModuleOp* getModule() override {
 			assert(module);
-			return module.operator->();
+			return &module;
 		}
 	};
 	class SQLFrontend : public lingodb::execution::Frontend {
