@@ -62,6 +62,8 @@ class MLIRContainer {
 
    mlir::Block* predBlock;
    mlir::Block* aggrBlock;
+   mlir::Block* mainBlock;
+   mlir::Block* queryBlock;
 
    std::vector<std::pair<std::string, lingodb::compiler::dialect::tuples::Column*>> columnMapping;
 

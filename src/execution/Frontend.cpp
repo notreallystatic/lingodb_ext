@@ -86,6 +86,8 @@ void MLIRContainer::initialize() {
    builder = mlir::OpBuilder(this->context.get());
    moduleOp = builder.create<mlir::ModuleOp>(builder.getUnknownLoc());
    builder.setInsertionPointToStart(moduleOp->getBody());
+   mainBlock = new mlir::Block();
+   queryBlock = new mlir::Block();
    initialized = true;
    // std::cout << "[Frontend.cpp](MLIRContainer::initialize) Initialization FINISHED\n";
    // std::cout.flush();
@@ -113,6 +115,8 @@ void MLIRContainer::reset() {
    auto& context = instance.getContext();
    instance.builder = mlir::OpBuilder(&context);
    instance.predBlock = nullptr;
+   instance.mainBlock = nullptr;
+   instance.queryBlock = nullptr;
    instance.baseTableOp = mlir::Value();
    instance.aggrOp = mlir::Value();
    instance.columnMapping.clear();
@@ -174,6 +178,10 @@ class MLIRFrontend : public lingodb::execution::Frontend {
       auto& instance = lingodb::execution::MLIRContainer::getInstance();
       // context = instance.getContext();
       module = instance.getModuleOp();
+	  std::cout << "[Frontend.cpp](MLIRFrontend::loadFromGlobalContext) Loaded module from global context\n";
+	  std::cout.flush();
+	  module->dump();
+	  std::cout << "\n";
    }
 
    mlir::ModuleOp* getModule() override {
