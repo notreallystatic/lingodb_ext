@@ -56,6 +56,7 @@ class MLIRContainer {
    mlir::OpBuilder builder;
    mlir::OwningOpRef<mlir::ModuleOp> moduleOp;
    mlir::OpPrintingFlags flags;
+   std::vector<std::string> names;
 
    mlir::Block* mainBlock;
    mlir::Block* queryBlock;

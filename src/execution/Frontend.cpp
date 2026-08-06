@@ -153,10 +153,10 @@ namespace {
 			// Do not take ownership of the global module; it is owned by MLIRContainer.
 			ownedModule = nullptr;
 			module = instance.getModuleOp();
-			std::cout << "[Frontend.cpp](MLIRFrontend::loadFromGlobalContext) Loaded module from global context\n";
-			std::cout.flush();
-			module->dump();
-			std::cout << "\n";
+			// std::cout << "[Frontend.cpp](MLIRFrontend::loadFromGlobalContext) Loaded module from global context\n";
+			// std::cout.flush();
+			// module->dump();
+			// std::cout << "\n";
 		}
 
 		mlir::ModuleOp* getModule() override {
