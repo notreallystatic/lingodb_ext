@@ -23,364 +23,414 @@
 
 #include <chrono>
 #include <sstream>
+#include <iostream>
+#include <string>
 #include <unordered_set>
+#include <algorithm>
+#include <vector>
+#include <utility>
+
+#include "llvm/Support/raw_ostream.h"
 
 namespace {
-namespace utility = lingodb::utility;
-utility::GlobalSetting<std::string> executionModeSetting("system.execution_mode", "DEFAULT");
-utility::GlobalSetting<std::string> subopOptPassesSetting("system.subop.opt", "ReuseLocal,Specialize,PullGatherUp,Compression");
-utility::Tracer::Event queryOptimizationEvent("Compilation", "Query Opt.");
-utility::Tracer::Event lowerRelalgEvent("Compilation", "Lower RelAlg");
-utility::Tracer::Event lowerSubOpEvent("Compilation", "Lower SubOp");
-utility::Tracer::Event lowerImperativeEvent("Compilation", "Lower DB");
-utility::Tracer::Event loadIndicesEvent("Compilation", "Lower DB");
+	namespace utility = lingodb::utility;
+	utility::GlobalSetting<std::string> executionModeSetting("system.execution_mode", "DEFAULT");
+	utility::GlobalSetting<std::string> subopOptPassesSetting("system.subop.opt", "ReuseLocal,Specialize,PullGatherUp,Compression");
+	utility::Tracer::Event queryOptimizationEvent("Compilation", "Query Opt.");
+	utility::Tracer::Event lowerRelalgEvent("Compilation", "Lower RelAlg");
+	utility::Tracer::Event lowerSubOpEvent("Compilation", "Lower SubOp");
+	utility::Tracer::Event lowerImperativeEvent("Compilation", "Lower DB");
+	utility::Tracer::Event loadIndicesEvent("Compilation", "Lower DB");
+	// Set LINGODB_DUMP_IR=1 to have the module printed after query optimization and
+	// after every lowering step. Off by default: the dumps are large and the printing
+	// happens inside the interval the compilation timers cover.
+	utility::GlobalSetting<bool> dumpIRSetting("system.dump_ir", false);
+	utility::GlobalSetting<bool> trackTuplesSetting("system.track_tuples", false);
+	// Report the per-operator tuple counts gathered by TrackTuplesPass. The counter
+	// ids are assigned when the pass runs, immediately before the qopt module is
+	// dumped, so a dump taken with tracking enabled carries the same ids and the
+	// counts can be attributed back to individual relalg operators.
+	void dumpTupleCounts(lingodb::runtime::ExecutionContext* executionContext) {
+		if (!trackTuplesSetting.getValue() || !executionContext) return;
+		const auto& counts = executionContext->getTupleCounts();
+		std::vector<std::pair<uint32_t, int64_t>> sorted(counts.begin(), counts.end());
+		std::sort(sorted.begin(), sorted.end());
+		std::cout << "===TUPLES BEGIN duckdb===\n";
+		for (const auto& [id, count] : sorted) {
+			std::cout << id << " " << count << "\n";
+		}
+		std::cout << "===TUPLES END duckdb===" << std::endl;
+	}
+	// Emit one module through std::cout in a single flushed write, wrapped in markers
+	// naming the binary that produced it and the stage it was taken at. Printing to
+	// llvm::errs() or llvm::outs() instead would use a buffer independent of the one
+	// behind std::cout, so the module could be reordered or cut apart by whatever else
+	// is writing to the same descriptor.
+	void dumpIR(const std::string& stage, mlir::ModuleOp moduleOp) {
+		if (!dumpIRSetting.getValue()) return;
+		std::string moduleText;
+		llvm::raw_string_ostream moduleStream(moduleText);
+		moduleOp.print(moduleStream, mlir::OpPrintingFlags().useLocalScope());
+		std::cout << "===MLIR BEGIN duckdb:" << stage << "===\n"
+			<< moduleText
+			<< "\n===MLIR END duckdb:" << stage << "===" << std::endl;
+	}
+
+	void dumpIRIfEnabled(const std::string& stage, mlir::ModuleOp moduleOp) {
+		if (!dumpIRSetting.getValue()) return;
+		dumpIR(stage, moduleOp);
+	}
 } // end anonymous namespace
 namespace lingodb::execution {
-using namespace lingodb::compiler::dialect;
-class DefaultQueryOptimizer : public QueryOptimizer {
-   void optimize(mlir::ModuleOp& moduleOp) override {
-      auto start = std::chrono::high_resolution_clock::now();
-      utility::Tracer::Trace trace(queryOptimizationEvent);
-      mlir::PassManager pm(moduleOp.getContext());
-      pm.enableVerifier(verify);
-      addLingoDBInstrumentation(pm, getSerializationState());
-      //pm.addPass(mlir::createInlinerPass());
-      //pm.addPass(mlir::createSymbolDCEPass());
-      relalg::createQueryOptPipeline(pm, catalog);
-      if (mlir::failed(pm.run(moduleOp))) {
-         error.emit() << " Query Optimization failed";
-      }
-      auto end = std::chrono::high_resolution_clock::now();
-      timing["QOpt"] = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0;
-   }
-};
-class RelAlgLoweringStep : public LoweringStep {
-   std::string getShortName() const override {
-      return "subop";
-   }
-   void implement(mlir::ModuleOp& moduleOp) override {
-      utility::Tracer::Trace trace(lowerRelalgEvent);
+	using namespace lingodb::compiler::dialect;
+	class DefaultQueryOptimizer : public QueryOptimizer {
+		void optimize(mlir::ModuleOp& moduleOp) override {
+			auto start = std::chrono::high_resolution_clock::now();
+			utility::Tracer::Trace trace(queryOptimizationEvent);
+			mlir::PassManager pm(moduleOp.getContext());
+			pm.enableVerifier(verify);
+			addLingoDBInstrumentation(pm, getSerializationState());
+			//pm.addPass(mlir::createInlinerPass());
+			//pm.addPass(mlir::createSymbolDCEPass());
+			relalg::createQueryOptPipeline(pm, catalog);
+			if (mlir::failed(pm.run(moduleOp))) {
+				error.emit() << " Query Optimization failed";
+			}
+			auto end = std::chrono::high_resolution_clock::now();
+			timing["QOpt"] = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0;
+		}
+	};
+	class RelAlgLoweringStep : public LoweringStep {
+		std::string getShortName() const override {
+			return "subop";
+		}
+		void implement(mlir::ModuleOp& moduleOp) override {
+			utility::Tracer::Trace trace(lowerRelalgEvent);
 
-      auto startLowerRelAlg = std::chrono::high_resolution_clock::now();
-      mlir::PassManager lowerRelAlgPm(moduleOp->getContext());
-      lowerRelAlgPm.enableVerifier(verify);
-      addLingoDBInstrumentation(lowerRelAlgPm, getSerializationState());
-      relalg::createLowerRelAlgToSubOpPipeline(lowerRelAlgPm);
-      if (mlir::failed(lowerRelAlgPm.run(moduleOp))) {
-         error.emit() << "Lowering of RelAlg to Sub-Operators failed";
-         return;
-      }
-      auto endLowerRelAlg = std::chrono::high_resolution_clock::now();
-      timing["lowerRelAlg"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerRelAlg - startLowerRelAlg).count() / 1000.0;
-      utility::Tracer::Trace indexLoadingTrace(loadIndicesEvent);
-      // Load the required tables/indices for the query
-      moduleOp.walk([&](mlir::Operation* op) {
-         if (auto getExternalOp = mlir::dyn_cast_or_null<subop::GetExternalOp>(*op)) {
-            auto* catalog = getCatalog();
-            auto json = nlohmann::json::parse(getExternalOp.getDescr().str());
-            if (json.contains("table")) {
-               if (auto relation = catalog->getTypedEntry<lingodb::catalog::TableCatalogEntry>(json["table"])) {
-                  relation.value()->ensureFullyLoaded();
-               }
-            }
-            if (json.contains("index")) {
-               if (auto relation = catalog->getTypedEntry<lingodb::catalog::IndexCatalogEntry>(json["index"])) {
-                  relation.value()->ensureFullyLoaded();
-               }
-               if (auto relation = catalog->getTypedEntry<lingodb::catalog::TableCatalogEntry>(json["relation"])) {
-                  relation.value()->ensureFullyLoaded();
-               }
-            }
-         }
-      });
-   }
-};
-class SubOpLoweringStep : public LoweringStep {
-   std::string getShortName() const override {
-      return "hl-imperative";
-   }
-   void implement(mlir::ModuleOp& moduleOp) override {
-      utility::Tracer::Trace trace(lowerSubOpEvent);
-      auto startLowerSubOp = std::chrono::high_resolution_clock::now();
-      mlir::PassManager optSubOpPm(moduleOp->getContext());
-      optSubOpPm.enableVerifier(verify);
-      addLingoDBInstrumentation(optSubOpPm, getSerializationState());
-      std::unordered_set<std::string> enabledPasses = {};
+			auto startLowerRelAlg = std::chrono::high_resolution_clock::now();
+			mlir::PassManager lowerRelAlgPm(moduleOp->getContext());
+			lowerRelAlgPm.enableVerifier(verify);
+			addLingoDBInstrumentation(lowerRelAlgPm, getSerializationState());
+			relalg::createLowerRelAlgToSubOpPipeline(lowerRelAlgPm);
+			if (mlir::failed(lowerRelAlgPm.run(moduleOp))) {
+				error.emit() << "Lowering of RelAlg to Sub-Operators failed";
+				return;
+			}
+			auto endLowerRelAlg = std::chrono::high_resolution_clock::now();
+			timing["lowerRelAlg"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerRelAlg - startLowerRelAlg).count() / 1000.0;
+			utility::Tracer::Trace indexLoadingTrace(loadIndicesEvent);
+			// Load the required tables/indices for the query
+			moduleOp.walk([&](mlir::Operation* op) {
+				if (auto getExternalOp = mlir::dyn_cast_or_null<subop::GetExternalOp>(*op)) {
+					auto* catalog = getCatalog();
+					auto json = nlohmann::json::parse(getExternalOp.getDescr().str());
+					if (json.contains("table")) {
+						if (auto relation = catalog->getTypedEntry<lingodb::catalog::TableCatalogEntry>(json["table"])) {
+							relation.value()->ensureFullyLoaded();
+						}
+					}
+					if (json.contains("index")) {
+						if (auto relation = catalog->getTypedEntry<lingodb::catalog::IndexCatalogEntry>(json["index"])) {
+							relation.value()->ensureFullyLoaded();
+						}
+						if (auto relation = catalog->getTypedEntry<lingodb::catalog::TableCatalogEntry>(json["relation"])) {
+							relation.value()->ensureFullyLoaded();
+						}
+					}
+				}
+				});
+		}
+	};
+	class SubOpLoweringStep : public LoweringStep {
+		std::string getShortName() const override {
+			return "hl-imperative";
+		}
+		void implement(mlir::ModuleOp& moduleOp) override {
+			utility::Tracer::Trace trace(lowerSubOpEvent);
+			auto startLowerSubOp = std::chrono::high_resolution_clock::now();
+			mlir::PassManager optSubOpPm(moduleOp->getContext());
+			optSubOpPm.enableVerifier(verify);
+			addLingoDBInstrumentation(optSubOpPm, getSerializationState());
+			std::unordered_set<std::string> enabledPasses = {};
 
-      enabledPasses.clear();
-      std::stringstream configList(subopOptPassesSetting.getValue());
-      std::string optPass;
-      while (std::getline(configList, optPass, ',')) {
-         enabledPasses.insert(optPass);
-      }
-      optSubOpPm.addPass(subop::createFoldColumnsPass());
-      if (enabledPasses.contains("ReuseLocal"))
-         optSubOpPm.addPass(subop::createReuseLocalPass());
-      optSubOpPm.addPass(subop::createSpecializeSubOpPass(enabledPasses.contains("Specialize")));
-      optSubOpPm.addPass(subop::createNormalizeSubOpPass());
-      if (enabledPasses.contains("PullGatherUp"))
-         optSubOpPm.addPass(subop::createPullGatherUpPass());
-      optSubOpPm.addPass(subop::createEnforceOrderPass());
-      optSubOpPm.addPass(subop::createInlineNestedMapPass());
-      optSubOpPm.addPass(subop::createFinalizePass());
-      optSubOpPm.addPass(subop::createSplitIntoExecutionStepsPass());
-      if (!moduleOp->hasAttr("subop.sequential")) {
-         optSubOpPm.addNestedPass<mlir::func::FuncOp>(subop::createParallelizePass());
-         optSubOpPm.addPass(subop::createSpecializeParallelPass());
-      }
-      optSubOpPm.addPass(subop::createPrepareLoweringPass());
-      if (mlir::failed(optSubOpPm.run(moduleOp))) {
-         error.emit() << "Lowering of Sub-Operators to imperative operations failed";
-         return;
-      }
-      snapshotImportantStep("subop-opt", moduleOp, getSerializationState());
+			enabledPasses.clear();
+			std::stringstream configList(subopOptPassesSetting.getValue());
+			std::string optPass;
+			while (std::getline(configList, optPass, ',')) {
+				enabledPasses.insert(optPass);
+			}
+			optSubOpPm.addPass(subop::createFoldColumnsPass());
+			if (enabledPasses.contains("ReuseLocal"))
+				optSubOpPm.addPass(subop::createReuseLocalPass());
+			optSubOpPm.addPass(subop::createSpecializeSubOpPass(enabledPasses.contains("Specialize")));
+			optSubOpPm.addPass(subop::createNormalizeSubOpPass());
+			if (enabledPasses.contains("PullGatherUp"))
+				optSubOpPm.addPass(subop::createPullGatherUpPass());
+			optSubOpPm.addPass(subop::createEnforceOrderPass());
+			optSubOpPm.addPass(subop::createInlineNestedMapPass());
+			optSubOpPm.addPass(subop::createFinalizePass());
+			optSubOpPm.addPass(subop::createSplitIntoExecutionStepsPass());
+			if (!moduleOp->hasAttr("subop.sequential")) {
+				optSubOpPm.addNestedPass<mlir::func::FuncOp>(subop::createParallelizePass());
+				optSubOpPm.addPass(subop::createSpecializeParallelPass());
+			}
+			optSubOpPm.addPass(subop::createPrepareLoweringPass());
+			if (mlir::failed(optSubOpPm.run(moduleOp))) {
+				error.emit() << "Lowering of Sub-Operators to imperative operations failed";
+				return;
+			}
+			snapshotImportantStep("subop-opt", moduleOp, getSerializationState());
 
-      mlir::PassManager lowerSubOpPm(moduleOp->getContext());
-      lowerSubOpPm.enableVerifier(verify);
-      addLingoDBInstrumentation(lowerSubOpPm, getSerializationState());
+			mlir::PassManager lowerSubOpPm(moduleOp->getContext());
+			lowerSubOpPm.enableVerifier(verify);
+			addLingoDBInstrumentation(lowerSubOpPm, getSerializationState());
 
-      subop::setCompressionEnabled(enabledPasses.contains("Compression"));
-      lowerSubOpPm.addPass(subop::createLowerSubOpPass());
-      lowerSubOpPm.addPass(mlir::createCanonicalizerPass());
-      lowerSubOpPm.addPass(mlir::createCSEPass());
-      if (mlir::failed(lowerSubOpPm.run(moduleOp))) {
-         error.emit() << "Lowering of Sub-Operators to imperative operations failed";
-         return;
-      }
-      auto endLowerSubOp = std::chrono::high_resolution_clock::now();
-      timing["lowerSubOp"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerSubOp - startLowerSubOp).count() / 1000.0;
-   }
-};
-class DefaultImperativeLowering : public LoweringStep {
-   std::string getShortName() const override {
-      return "ll-imperative";
-   }
-   void implement(mlir::ModuleOp& moduleOp) override {
-      utility::Tracer::Trace trace(lowerImperativeEvent);
-      auto startLowerDB = std::chrono::high_resolution_clock::now();
-      mlir::PassManager lowerDBPm(moduleOp->getContext());
-      lowerDBPm.enableVerifier(verify);
-      addLingoDBInstrumentation(lowerDBPm, getSerializationState());
-      db::createLowerDBPipeline(lowerDBPm);
-      if (mlir::failed(lowerDBPm.run(moduleOp))) {
-         error.emit() << "Lowering of imperative db operations failed";
-         return;
-      }
-      auto endLowerDB = std::chrono::high_resolution_clock::now();
-      auto startLowerArrow = std::chrono::high_resolution_clock::now();
-      mlir::PassManager lowerArrowPm(moduleOp->getContext());
-      lowerArrowPm.enableVerifier(verify);
-      addLingoDBInstrumentation(lowerArrowPm, getSerializationState());
-      lowerArrowPm.addPass(arrow::createLowerToStdPass());
-      lowerArrowPm.addPass(mlir::createCanonicalizerPass());
-      lowerArrowPm.addPass(mlir::createLoopInvariantCodeMotionPass());
-      lowerArrowPm.addPass(mlir::createCSEPass());
-      if (mlir::failed(lowerArrowPm.run(moduleOp))) {
-         error.emit() << "Lowering of arrow failed";
-         return;
-      }
-      auto endLowerArrow = std::chrono::high_resolution_clock::now();
-      timing["lowerDB"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerDB - startLowerDB).count() / 1000.0;
-      timing["lowerArrow"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerArrow - startLowerArrow).count() / 1000.0;
-   }
-};
-ExecutionMode getExecutionMode() {
-   ExecutionMode runMode;
-   if constexpr (RUN_QUERIES_WITH_PERF) {
-      runMode = ExecutionMode::PERF;
-   } else {
-      runMode = ExecutionMode::DEFAULT;
-   }
-   std::string mode = executionModeSetting.getValue();
-   if (mode == "PERF") {
-      runMode = ExecutionMode::PERF;
-   } else if (mode == "CHEAP") {
-      runMode = ExecutionMode::CHEAP;
-   } else if (mode == "DEFAULT") {
-      runMode = ExecutionMode::DEFAULT;
-   } else if (mode == "DEBUGGING") {
-      runMode = ExecutionMode::DEBUGGING;
-   } else if (mode == "SPEED") {
-      std::cout << "using speed mode" << std::endl;
-      runMode = ExecutionMode::SPEED;
-   } else if (mode == "C") {
-      runMode = ExecutionMode::C;
-   }
+			subop::setCompressionEnabled(enabledPasses.contains("Compression"));
+			lowerSubOpPm.addPass(subop::createLowerSubOpPass());
+			lowerSubOpPm.addPass(mlir::createCanonicalizerPass());
+			lowerSubOpPm.addPass(mlir::createCSEPass());
+			if (mlir::failed(lowerSubOpPm.run(moduleOp))) {
+				error.emit() << "Lowering of Sub-Operators to imperative operations failed";
+				return;
+			}
+			auto endLowerSubOp = std::chrono::high_resolution_clock::now();
+			timing["lowerSubOp"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerSubOp - startLowerSubOp).count() / 1000.0;
+		}
+	};
+	class DefaultImperativeLowering : public LoweringStep {
+		std::string getShortName() const override {
+			return "ll-imperative";
+		}
+		void implement(mlir::ModuleOp& moduleOp) override {
+			utility::Tracer::Trace trace(lowerImperativeEvent);
+			auto startLowerDB = std::chrono::high_resolution_clock::now();
+			mlir::PassManager lowerDBPm(moduleOp->getContext());
+			lowerDBPm.enableVerifier(verify);
+			addLingoDBInstrumentation(lowerDBPm, getSerializationState());
+			db::createLowerDBPipeline(lowerDBPm);
+			if (mlir::failed(lowerDBPm.run(moduleOp))) {
+				error.emit() << "Lowering of imperative db operations failed";
+				return;
+			}
+			auto endLowerDB = std::chrono::high_resolution_clock::now();
+			auto startLowerArrow = std::chrono::high_resolution_clock::now();
+			mlir::PassManager lowerArrowPm(moduleOp->getContext());
+			lowerArrowPm.enableVerifier(verify);
+			addLingoDBInstrumentation(lowerArrowPm, getSerializationState());
+			lowerArrowPm.addPass(arrow::createLowerToStdPass());
+			lowerArrowPm.addPass(mlir::createCanonicalizerPass());
+			lowerArrowPm.addPass(mlir::createLoopInvariantCodeMotionPass());
+			lowerArrowPm.addPass(mlir::createCSEPass());
+			if (mlir::failed(lowerArrowPm.run(moduleOp))) {
+				error.emit() << "Lowering of arrow failed";
+				return;
+			}
+			auto endLowerArrow = std::chrono::high_resolution_clock::now();
+			timing["lowerDB"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerDB - startLowerDB).count() / 1000.0;
+			timing["lowerArrow"] = std::chrono::duration_cast<std::chrono::microseconds>(endLowerArrow - startLowerArrow).count() / 1000.0;
+		}
+	};
+	ExecutionMode getExecutionMode() {
+		ExecutionMode runMode;
+		if constexpr (RUN_QUERIES_WITH_PERF) {
+			runMode = ExecutionMode::PERF;
+		} else {
+			runMode = ExecutionMode::DEFAULT;
+		}
+		std::string mode = executionModeSetting.getValue();
+		if (mode == "PERF") {
+			runMode = ExecutionMode::PERF;
+		} else if (mode == "CHEAP") {
+			runMode = ExecutionMode::CHEAP;
+		} else if (mode == "DEFAULT") {
+			runMode = ExecutionMode::DEFAULT;
+		} else if (mode == "DEBUGGING") {
+			runMode = ExecutionMode::DEBUGGING;
+		} else if (mode == "SPEED") {
+			std::cout << "using speed mode" << std::endl;
+			runMode = ExecutionMode::SPEED;
+		} else if (mode == "C") {
+			runMode = ExecutionMode::C;
+		}
 #if GPU_ENABLED == 1
-   else if (mode == "GPU") {
-      runMode = ExecutionMode::GPU;
-   }
+		else if (mode == "GPU") {
+			runMode = ExecutionMode::GPU;
+		}
 #endif
 #if BASELINE_ENABLED == 1
-   else if (mode == "BASELINE") {
-      runMode = ExecutionMode::BASELINE;
-   } else if (mode == "BASELINE_SPEED") {
-      runMode = ExecutionMode::BASELINE_SPEED;
-   }
+		else if (mode == "BASELINE") {
+			runMode = ExecutionMode::BASELINE;
+		} else if (mode == "BASELINE_SPEED") {
+			runMode = ExecutionMode::BASELINE_SPEED;
+		}
 #else
-   else if (mode == "BASELINE" || mode == "BASELINE_SPEED") {
-      std::cerr << "Baseline mode is not enabled in this build" << std::endl;
-      exit(1);
-   }
+		else if (mode == "BASELINE" || mode == "BASELINE_SPEED") {
+			std::cerr << "Baseline mode is not enabled in this build" << std::endl;
+			exit(1);
+		}
 #endif
-   else if (mode == "NONE") {
-      runMode = ExecutionMode::NONE;
-   } else {
-      std::cerr << "Unknown execution mode: " << mode << std::endl;
-      exit(1);
-   }
-   return runMode;
-}
+		else if (mode == "NONE") {
+			runMode = ExecutionMode::NONE;
+		} else {
+			std::cerr << "Unknown execution mode: " << mode << std::endl;
+			exit(1);
+		}
+		return runMode;
+	}
 
-class DefaultQueryExecuter : public QueryExecuter {
-   void handleError(std::string phase, Error& e) {
-      if (e) {
-         std::cerr << phase << ": " << e.getMessage() << std::endl;
-         exit(1);
-      }
-   }
-   void handleTiming(const std::unordered_map<std::string, double>& timing) {
-      if (queryExecutionConfig->timingProcessor) {
-         queryExecutionConfig->timingProcessor->addTiming(timing);
-      }
-   }
+	class DefaultQueryExecuter : public QueryExecuter {
+		void handleError(std::string phase, Error& e) {
+			if (e) {
+				std::cerr << phase << ": " << e.getMessage() << std::endl;
+				exit(1);
+			}
+		}
+		void handleTiming(const std::unordered_map<std::string, double>& timing) {
+			if (queryExecutionConfig->timingProcessor) {
+				queryExecutionConfig->timingProcessor->addTiming(timing);
+			}
+		}
 
-   public:
-   using QueryExecuter::QueryExecuter;
-   void execute() override {
-      if (!executionContext) {
-         std::cerr << "Execution Context is missing" << std::endl;
-         exit(1);
-      }
-      auto* catalog = executionContext->getSession().getCatalog().get();
+	public:
+		using QueryExecuter::QueryExecuter;
+		void execute() override {
+			if (!executionContext) {
+				std::cerr << "Execution Context is missing" << std::endl;
+				exit(1);
+			}
+			auto* catalog = executionContext->getSession().getCatalog().get();
 
-      if (!queryExecutionConfig->frontend) {
-         std::cerr << "Frontend is missing" << std::endl;
-         exit(1);
-      }
-      auto& frontend = *queryExecutionConfig->frontend;
+			if (!queryExecutionConfig->frontend) {
+				std::cerr << "Frontend is missing" << std::endl;
+				exit(1);
+			}
+			auto& frontend = *queryExecutionConfig->frontend;
 
-      frontend.setCatalog(catalog);
-      if (data) {
-         frontend.loadFromString(data.value());
-      } else if (file) {
-         frontend.loadFromFile(file.value());
-      } else if (globalContext) {
-         frontend.loadFromGlobalContext();
-      } else {
-         std::cerr << "Must provide file or string!" << std::endl;
-         exit(1);
-      }
-      auto serializationState = std::make_shared<SnapshotState>();
-      serializationState->serialize = true;
+			frontend.setCatalog(catalog);
+			if (data) {
+				frontend.loadFromString(data.value());
+			} else if (file) {
+				frontend.loadFromFile(file.value());
+			} else if (globalContext) {
+				frontend.loadFromGlobalContext();
+			} else {
+				std::cerr << "Must provide file or string!" << std::endl;
+				exit(1);
+			}
+			auto serializationState = std::make_shared<SnapshotState>();
+			serializationState->serialize = true;
 
-      handleError("FRONTEND", frontend.getError());
-      mlir::ModuleOp& moduleOp = *queryExecutionConfig->frontend->getModule();
-      // std::cout << "[QueryExecutor](execute) :: Loaded moduleOp\n";
-      // std::cout.flush();
-      // moduleOp->dump();
-      snapshotImportantStep("canonical", moduleOp, serializationState);
-      if (queryExecutionConfig->queryOptimizer) {
-         auto& queryOptimizer = *queryExecutionConfig->queryOptimizer;
-         queryOptimizer.setCatalog(catalog);
-         queryOptimizer.setSerializationState(serializationState);
-         queryOptimizer.optimize(moduleOp);
-         handleError("OPTIMIZER", queryOptimizer.getError());
-         handleTiming(queryOptimizer.getTiming());
-         if (queryExecutionConfig->trackTupleCount) {
-            mlir::PassManager pm(moduleOp.getContext());
-            pm.addPass(relalg::createTrackTuplesPass());
-            if (pm.run(moduleOp).failed()) {
-               Error e;
-               e.emit() << "createTrackTuplesPass failed";
-               handleError("TUPLE_TRACKING", e);
-            }
-         }
-         snapshotImportantStep("qopt", moduleOp, serializationState);
-      }
+			handleError("FRONTEND", frontend.getError());
+			mlir::ModuleOp& moduleOp = *queryExecutionConfig->frontend->getModule();
+			// std::cout << "[QueryExecutor](execute) :: Loaded moduleOp\n";
+			// std::cout.flush();
+			// moduleOp->dump();
+			snapshotImportantStep("canonical", moduleOp, serializationState);
+			if (queryExecutionConfig->queryOptimizer) {
+				auto& queryOptimizer = *queryExecutionConfig->queryOptimizer;
+				queryOptimizer.setCatalog(catalog);
+				queryOptimizer.setSerializationState(serializationState);
+				queryOptimizer.optimize(moduleOp);
+				handleError("OPTIMIZER", queryOptimizer.getError());
+				handleTiming(queryOptimizer.getTiming());
+				// if (queryExecutionConfig->trackTupleCount) {
+				if (queryExecutionConfig->trackTupleCount || trackTuplesSetting.getValue()) {
+					mlir::PassManager pm(moduleOp.getContext());
+					pm.addPass(relalg::createTrackTuplesPass());
+					if (pm.run(moduleOp).failed()) {
+						Error e;
+						e.emit() << "createTrackTuplesPass failed";
+						handleError("TUPLE_TRACKING", e);
+					}
+				}
+				snapshotImportantStep("qopt", moduleOp, serializationState);
+				dumpIRIfEnabled("qopt", moduleOp);
+			}
 
-      bool parallelismEnabled = scheduler::getNumWorkers() != 1 && queryExecutionConfig->parallel;
-      if (!frontend.isParallelismAllowed() || !parallelismEnabled) {
-         moduleOp->setAttr("subop.sequential", mlir::UnitAttr::get(moduleOp->getContext()));
-         //numThreads = 1;
-      }
-      for (auto& loweringStepPtr : queryExecutionConfig->loweringSteps) {
-         auto& loweringStep = *loweringStepPtr;
-         loweringStep.setCatalog(catalog);
-         loweringStep.setSerializationState(serializationState);
-         loweringStep.implement(moduleOp);
-         snapshotImportantStep(loweringStep.getShortName(), moduleOp, serializationState);
-         handleError("LOWERING", loweringStep.getError());
-         handleTiming(loweringStep.getTiming());
-      }
-      if (queryExecutionConfig->executionBackend) {
-         auto& executionBackend = *queryExecutionConfig->executionBackend;
-         executionBackend.setSerializationState(serializationState);
-         executionBackend.execute(moduleOp, executionContext.get());
+			bool parallelismEnabled = scheduler::getNumWorkers() != 1 && queryExecutionConfig->parallel;
+			if (!frontend.isParallelismAllowed() || !parallelismEnabled) {
+				moduleOp->setAttr("subop.sequential", mlir::UnitAttr::get(moduleOp->getContext()));
+				//numThreads = 1;
+			}
+			for (auto& loweringStepPtr : queryExecutionConfig->loweringSteps) {
+				auto& loweringStep = *loweringStepPtr;
+				loweringStep.setCatalog(catalog);
+				loweringStep.setSerializationState(serializationState);
+				loweringStep.implement(moduleOp);
+				snapshotImportantStep(loweringStep.getShortName(), moduleOp, serializationState);
+				handleError("LOWERING", loweringStep.getError());
+				handleTiming(loweringStep.getTiming());
+				dumpIRIfEnabled(loweringStep.getShortName(), moduleOp);
+			}
+			if (queryExecutionConfig->executionBackend) {
+				auto& executionBackend = *queryExecutionConfig->executionBackend;
+				executionBackend.setSerializationState(serializationState);
+				executionBackend.execute(moduleOp, executionContext.get());
+				dumpTupleCounts(executionContext.get());
 #ifdef TRACER
-         utility::Tracer::dump();
+				utility::Tracer::dump();
 #endif
-         handleError("BACKEND", executionBackend.getError());
-         handleTiming(executionBackend.getTiming());
-         if (queryExecutionConfig->resultProcessor) {
-            auto& resultProcessor = *queryExecutionConfig->resultProcessor;
-            resultProcessor.process(executionContext.get());
-         }
-      }
-      if (queryExecutionConfig->timingProcessor) {
-         queryExecutionConfig->timingProcessor->process();
-      }
-   }
-};
-std::unique_ptr<QueryExecutionConfig> createQueryExecutionConfig(execution::ExecutionMode runMode, bool sqlInput) {
-   auto config = std::make_unique<QueryExecutionConfig>();
-   if (sqlInput) {
-      config->frontend = createSQLFrontend();
-   } else {
-      config->frontend = createMLIRFrontend();
-   }
-   config->queryOptimizer = std::make_unique<DefaultQueryOptimizer>();
-   config->loweringSteps.emplace_back(std::make_unique<RelAlgLoweringStep>());
-   config->loweringSteps.emplace_back(std::make_unique<SubOpLoweringStep>());
-   config->loweringSteps.emplace_back(std::make_unique<DefaultImperativeLowering>());
+				handleError("BACKEND", executionBackend.getError());
+				handleTiming(executionBackend.getTiming());
+				if (queryExecutionConfig->resultProcessor) {
+					auto& resultProcessor = *queryExecutionConfig->resultProcessor;
+					resultProcessor.process(executionContext.get());
+				}
+			}
+			if (queryExecutionConfig->timingProcessor) {
+				queryExecutionConfig->timingProcessor->process();
+			}
+		}
+	};
+	std::unique_ptr<QueryExecutionConfig> createQueryExecutionConfig(execution::ExecutionMode runMode, bool sqlInput) {
+		auto config = std::make_unique<QueryExecutionConfig>();
+		if (sqlInput) {
+			config->frontend = createSQLFrontend();
+		} else {
+			config->frontend = createMLIRFrontend();
+		}
+		config->queryOptimizer = std::make_unique<DefaultQueryOptimizer>();
+		config->loweringSteps.emplace_back(std::make_unique<RelAlgLoweringStep>());
+		config->loweringSteps.emplace_back(std::make_unique<SubOpLoweringStep>());
+		config->loweringSteps.emplace_back(std::make_unique<DefaultImperativeLowering>());
 #if defined(ASAN_ACTIVE)
-   if (runMode == ExecutionMode::DEBUGGING) {
-      std::cerr << "ASAN is not supported in DEBUGGING mode. Switching to C mode" << std::endl;
-      runMode = ExecutionMode::C;
-   }
+		if (runMode == ExecutionMode::DEBUGGING) {
+			std::cerr << "ASAN is not supported in DEBUGGING mode. Switching to C mode" << std::endl;
+			runMode = ExecutionMode::C;
+		}
 #endif
-   if (runMode == ExecutionMode::DEBUGGING) {
-      config->executionBackend = createLLVMDebugBackend();
-   } else if (runMode == ExecutionMode::C) {
-      config->executionBackend = createCBackend();
-   } else if (runMode == ExecutionMode::PERF) {
-      config->executionBackend = createLLVMProfilingBackend();
-   } else if (runMode == ExecutionMode::GPU) {
+		if (runMode == ExecutionMode::DEBUGGING) {
+			config->executionBackend = createLLVMDebugBackend();
+		} else if (runMode == ExecutionMode::C) {
+			config->executionBackend = createCBackend();
+		} else if (runMode == ExecutionMode::PERF) {
+			config->executionBackend = createLLVMProfilingBackend();
+		} else if (runMode == ExecutionMode::GPU) {
 #if GPU_ENABLED == 1
-      config->executionBackend = createGPULLVMBackend();
+			config->executionBackend = createGPULLVMBackend();
 #endif
-   } else if (runMode == ExecutionMode::BASELINE || runMode == ExecutionMode::BASELINE_SPEED) {
+		} else if (runMode == ExecutionMode::BASELINE || runMode == ExecutionMode::BASELINE_SPEED) {
 #if BASELINE_ENABLED == 1
-      config->executionBackend = createBaselineBackend();
+			config->executionBackend = createBaselineBackend();
 #else
-      std::cerr << "Baseline mode is not enabled in this build" << std::endl;
+			std::cerr << "Baseline mode is not enabled in this build" << std::endl;
 #endif
-   } else if (runMode != ExecutionMode::NONE) {
-      config->executionBackend = createDefaultLLVMBackend();
-   }
-   config->resultProcessor = execution::createTablePrinter();
-   if (runMode == ExecutionMode::SPEED || runMode == ExecutionMode::BASELINE_SPEED) {
-      config->queryOptimizer->disableVerification();
-      config->executionBackend->disableVerification();
-      for (auto& loweringStep : config->loweringSteps) {
-         loweringStep->disableVerification();
-      }
-      config->executionBackend->disableVerification();
-   }
-   return config;
-}
-std::unique_ptr<QueryExecuter> QueryExecuter::createDefaultExecuter(std::unique_ptr<QueryExecutionConfig> queryExecutionConfig, runtime::Session& session) {
-   return std::make_unique<DefaultQueryExecuter>(std::move(queryExecutionConfig), session.createExecutionContext());
-}
+		} else if (runMode != ExecutionMode::NONE) {
+			config->executionBackend = createDefaultLLVMBackend();
+		}
+		config->resultProcessor = execution::createTablePrinter();
+		if (runMode == ExecutionMode::SPEED || runMode == ExecutionMode::BASELINE_SPEED) {
+			config->queryOptimizer->disableVerification();
+			config->executionBackend->disableVerification();
+			for (auto& loweringStep : config->loweringSteps) {
+				loweringStep->disableVerification();
+			}
+			config->executionBackend->disableVerification();
+		}
+		return config;
+	}
+	std::unique_ptr<QueryExecuter> QueryExecuter::createDefaultExecuter(std::unique_ptr<QueryExecutionConfig> queryExecutionConfig, runtime::Session& session) {
+		return std::make_unique<DefaultQueryExecuter>(std::move(queryExecutionConfig), session.createExecutionContext());
+	}
 
 } // namespace lingodb::execution

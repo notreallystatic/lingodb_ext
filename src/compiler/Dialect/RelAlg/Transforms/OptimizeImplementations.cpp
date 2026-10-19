@@ -4,6 +4,7 @@
 #include "lingodb/compiler/Dialect/RelAlg/Transforms/queryopt/QueryGraph.h"
 #include "lingodb/compiler/Dialect/TupleStream/TupleStreamOps.h"
 #include "lingodb/compiler/mlir-support/eval.h"
+#include "lingodb/utility/Setting.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/IRMapping.h"
@@ -17,6 +18,8 @@
 
 namespace {
 using namespace lingodb::compiler::dialect;
+// LINGODB_OPT_INDEX_NESTED_LOOP=false: always hash join, even when a primary key index exists
+lingodb::utility::GlobalSetting<bool> indexNestedLoopSetting("system.opt.index_nested_loop", true);
 
 class HashJoinUtils {
    public:
@@ -468,8 +471,9 @@ class OptimizeImplementations : public mlir::PassWrapper<OptimizeImplementations
                   // Determine if index nested loop is possible and is beneficial
                   std::stack<mlir::Operation*> leftPath, rightPath;
                   std::string leftIndexName, rightIndexName;
-                  bool leftCanUseIndex = isBaseRelationWithSelects(left, leftPath) && containsExactlyIndexColumns(binOp.getContext(), leftPath.top(), &predicateOperator.getPredicateBlock(), leftIndexName);
-                  bool rightCanUseIndex = isBaseRelationWithSelects(right, rightPath) && containsExactlyIndexColumns(binOp.getContext(), rightPath.top(), &predicateOperator.getPredicateBlock(), rightIndexName);
+                  bool inljEnabled = indexNestedLoopSetting.getValue();
+                  bool leftCanUseIndex = inljEnabled && isBaseRelationWithSelects(left, leftPath) && containsExactlyIndexColumns(binOp.getContext(), leftPath.top(), &predicateOperator.getPredicateBlock(), leftIndexName);
+                  bool rightCanUseIndex = inljEnabled && isBaseRelationWithSelects(right, rightPath) && containsExactlyIndexColumns(binOp.getContext(), rightPath.top(), &predicateOperator.getPredicateBlock(), rightIndexName);
                   bool isInnerJoin = mlir::isa<relalg::InnerJoinOp>(predicateOperator);
                   bool reversed = false;
                   prepareForHash(predicateOperator);
@@ -484,10 +488,10 @@ class OptimizeImplementations : public mlir::PassWrapper<OptimizeImplementations
                         auto leftBaseMeta = mlir::dyn_cast_or_null<relalg::TableMetaDataAttr>(leftBaseTable->getAttr("meta"));
                         auto rightBaseMeta = mlir::dyn_cast_or_null<relalg::TableMetaDataAttr>(rightBaseTable->getAttr("meta"));
                         if (leftBaseMeta && rightBaseMeta) {
-                           int numBaseRowsLeft = leftBaseMeta.getMeta()->getNumRows() + 1;
-                           int numBaseRowsRight = leftBaseMeta.getMeta()->getNumRows() + 1;
-                           int numNonBaseRowsLeft = left->hasAttr("rows") ? mlir::dyn_cast_or_null<mlir::FloatAttr>(left->getAttr("rows")).getValueAsDouble() + 1 : 1;
-                           int numNonBaseRowsRight = right->hasAttr("rows") ? mlir::dyn_cast_or_null<mlir::FloatAttr>(right->getAttr("rows")).getValueAsDouble() + 1 : 1;
+                           double numBaseRowsLeft = leftBaseMeta.getMeta()->getNumRows() + 1;
+                           double numBaseRowsRight = rightBaseMeta.getMeta()->getNumRows() + 1;
+                           double numNonBaseRowsLeft = left->hasAttr("rows") ? mlir::dyn_cast_or_null<mlir::FloatAttr>(left->getAttr("rows")).getValueAsDouble() + 1 : 1;
+                           double numNonBaseRowsRight = right->hasAttr("rows") ? mlir::dyn_cast_or_null<mlir::FloatAttr>(right->getAttr("rows")).getValueAsDouble() + 1 : 1;
                            // Exchange left and right side if deemed beneficial by heuristic
                            if (numNonBaseRowsRight / numBaseRowsLeft < numNonBaseRowsLeft / numBaseRowsRight) {
                               reversed = true;

@@ -349,14 +349,14 @@ double QueryGraph::estimateSelectivity(Operator op, NodeSet left, NodeSet right)
    }
    for (auto p : pkeysLeft) {
       auto [rows, pkey] = p;
-      if (pkey.isSubsetOf(predicatesLeft)) {
+      if (!pkey.empty() && pkey.isSubsetOf(predicatesLeft)) {
          selectivity *= 1 / rows;
          predicatesLeft.remove(pkey);
       }
    }
    for (auto p : pkeysRight) {
       auto [rows, pkey] = p;
-      if (pkey.isSubsetOf(predicatesRight)) {
+      if (!pkey.empty() && pkey.isSubsetOf(predicatesRight)) {
          selectivity *= 1 / rows;
          predicatesRight.remove(pkey);
       }
