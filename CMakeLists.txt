@@ -7,7 +7,8 @@ set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard to conform to")
 # No -DTRACER: with it, LingoDB re-serializes every trace record since process start
 # to lingodb.trace after each query, so the per-query overhead grows with every query.
-set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g")
+# -DNDEBUG as in LingoDB's own Release build, so asserts are compiled out of the runtime.
+set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O3 -g -DNDEBUG")
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     # Silence warning about default label in switch which covers all enumeration values (false positive)
@@ -219,7 +220,9 @@ find_package(Boost REQUIRED COMPONENTS context)
 target_link_libraries(lingodb_ext PUBLIC Boost::context)
 
 
-add_compile_definitions(RUN_QUERIES_WITH_PERF=1)
+# 0 as in LingoDB's own build: with 1 the default execution mode is PERF, which
+# launches perf record and sleeps 10s whenever LINGODB_EXECUTION_MODE is unset.
+add_compile_definitions(RUN_QUERIES_WITH_PERF=0)
 target_include_directories(lingodb_ext PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
